@@ -1,22 +1,24 @@
-export interface Message {
+export interface User {
   id: string;
-  text: string;
-  sender: 'user' | 'bot';
-  timestamp: Date;
-  isError?: boolean;
+  name: string;
+  pin: string;
+  createdAt: string;
 }
 
-export interface Appointment {
-  id: string;
-  ticketNumber: string;
-  patientName: string;
-  doctorName: string;
-  preferredTime: string;
-  createdAt: string; // ISO String
-  status: 'confirmed' | 'completed' | 'cancelled';
+export interface RoutineTask {
+  time: string;
+  activity: string;
 }
 
-export interface ChatState {
-  messages: Message[];
-  isLoading: boolean;
+export interface DailyRoutine {
+  id: string;
+  userId: string;
+  title: string; // e.g., "Monday Productivity"
+  tasks: RoutineTask[];
+  createdAt: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
 }

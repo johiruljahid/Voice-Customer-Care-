@@ -9,10 +9,10 @@ export const AdminLogin: React.FC = () => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === '1234') { // Mock PIN
+    if (pin === 'Mishela') { // Updated PIN
       navigate('/admin/dashboard');
     } else {
-      setError('Invalid PIN. Try 1234');
+      setError('Invalid PIN. Please try again.');
     }
   };
 
@@ -35,8 +35,7 @@ export const AdminLogin: React.FC = () => {
               value={pin}
               onChange={(e) => setPin(e.target.value)}
               className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-hospital-500 text-center text-2xl tracking-widest"
-              placeholder="••••"
-              maxLength={4}
+              placeholder="•••••••"
               autoFocus
             />
           </div>

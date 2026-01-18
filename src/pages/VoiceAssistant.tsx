@@ -1,33 +1,44 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, Type } from "@google/genai";
+import { useNavigate } from 'react-router-dom';
 import { Header } from '../components/Header';
 import { SYSTEM_INSTRUCTION } from '../constants';
-import { Mic, MicOff, Activity, CalendarCheck, ShieldCheck } from 'lucide-react';
+import { Mic, MicOff, Heart, Sparkles, Music } from 'lucide-react';
 import { createPcmBlob, base64ToUint8Array, decodeAudioData } from '../utils/audio';
-import { saveAppointment } from '../utils/db';
-import { Link } from 'react-router-dom';
+import { saveRoutine, getCurrentUser } from '../utils/db';
 import { clsx } from 'clsx';
 
 // --- Tool Definitions ---
-const bookAppointmentTool: FunctionDeclaration = {
-  name: 'bookAppointment',
+const createRoutineTool: FunctionDeclaration = {
+  name: 'createRoutine',
   parameters: {
     type: Type.OBJECT,
-    description: 'Book a doctor appointment for a patient.',
+    description: 'Create and save a daily routine for the user.',
     properties: {
-      patientName: { type: Type.STRING, description: 'Name of the patient' },
-      doctorName: { type: Type.STRING, description: 'Name of the doctor' },
-      preferredTime: { type: Type.STRING, description: 'Preferred time for the appointment (e.g., "Monday 5 PM")' },
+      title: { type: Type.STRING, description: 'Title of the routine (e.g., Work Day, Holiday)' },
+      tasks: {
+        type: Type.ARRAY,
+        description: 'List of tasks with times',
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            time: { type: Type.STRING, description: 'Time (e.g., 7:00 AM)' },
+            activity: { type: Type.STRING, description: 'Activity description' }
+          }
+        }
+      },
     },
-    required: ['patientName', 'doctorName'],
+    required: ['title', 'tasks'],
   },
 };
 
 const VoiceAssistant: React.FC = () => {
+  const navigate = useNavigate();
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [statusText, setStatusText] = useState("কথা বলতে নিচের বাটনে চাপ দিন");
+  const [statusText, setStatusText] = useState("Touch my heart to connect...");
+  const [visualizerHeight, setVisualizerHeight] = useState<number[]>(new Array(5).fill(20));
   
   const inputContextRef = useRef<AudioContext | null>(null);
   const outputContextRef = useRef<AudioContext | null>(null);
@@ -38,11 +49,29 @@ const VoiceAssistant: React.FC = () => {
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionRef = useRef<any>(null);
 
+  // Auth Check
   useEffect(() => {
-    return () => {
-      disconnect();
-    };
+    const user = getCurrentUser();
+    if (!user) {
+      navigate('/login');
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    return () => disconnect();
   }, []);
+
+  // Simple Visualizer Animation
+  useEffect(() => {
+    if (isSpeaking) {
+      const interval = setInterval(() => {
+        setVisualizerHeight(prev => prev.map(() => Math.random() * 40 + 10));
+      }, 100);
+      return () => clearInterval(interval);
+    } else {
+      setVisualizerHeight(new Array(5).fill(10));
+    }
+  }, [isSpeaking]);
 
   const initializeAudioContexts = () => {
     if (!inputContextRef.current) {
@@ -54,6 +83,8 @@ const VoiceAssistant: React.FC = () => {
   };
 
   const connect = async () => {
+    const user = getCurrentUser();
+    if (!user) return navigate('/login');
     if (!process.env.API_KEY) {
       setStatusText("API Key Missing!");
       return;
@@ -64,7 +95,7 @@ const VoiceAssistant: React.FC = () => {
       await outputContextRef.current?.resume();
       await inputContextRef.current?.resume();
 
-      setStatusText("সংযোগ হচ্ছে...");
+      setStatusText("Connecting to your heart...");
       
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -77,7 +108,7 @@ const VoiceAssistant: React.FC = () => {
           onopen: () => {
             setIsConnected(true);
             setIsListening(true);
-            setStatusText("আমি শুনছি... বলুন");
+            setStatusText(`I'm here, ${user.name}... tell me anything.`);
             
             if (inputContextRef.current && streamRef.current) {
               const source = inputContextRef.current.createMediaStreamSource(streamRef.current);
@@ -100,30 +131,20 @@ const VoiceAssistant: React.FC = () => {
           onmessage: async (message: LiveServerMessage) => {
              // Handle Function Calls
              if (message.toolCall) {
-                setStatusText("বুকিং কনফার্ম করা হচ্ছে...");
                 for (const fc of message.toolCall.functionCalls) {
-                    if (fc.name === 'bookAppointment') {
-                        const ticketNumber = "POP-" + Math.floor(1000 + Math.random() * 9000);
+                    if (fc.name === 'createRoutine') {
+                        setStatusText("Planning your day, sweetheart...");
                         const args = fc.args as any;
                         
-                        // Save to Database
-                        saveAppointment({
+                        saveRoutine({
                           id: crypto.randomUUID(),
-                          ticketNumber,
-                          patientName: args.patientName || "Unknown",
-                          doctorName: args.doctorName || "General Physician",
-                          preferredTime: args.preferredTime || "Not Specified",
-                          createdAt: new Date().toISOString(),
-                          status: 'confirmed'
+                          userId: user.id,
+                          title: args.title || "Daily Routine",
+                          tasks: args.tasks || [],
+                          createdAt: new Date().toISOString()
                         });
 
-                        console.log("Booking Saved:", args);
-                        
-                        const result = { 
-                          status: "success", 
-                          ticketNumber: ticketNumber,
-                          message: "Appointment booked successfully and saved to admin panel." 
-                        };
+                        const result = { status: "success", message: "Routine saved to your dashboard." };
                         
                         sessionPromise.then(session => {
                             session.sendToolResponse({
@@ -143,7 +164,7 @@ const VoiceAssistant: React.FC = () => {
              if (audioData) {
                 if (outputContextRef.current) {
                    setIsSpeaking(true);
-                   setStatusText("বলছি...");
+                   setStatusText("Maya is speaking...");
                    
                    nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputContextRef.current.currentTime);
                    
@@ -161,7 +182,7 @@ const VoiceAssistant: React.FC = () => {
                      audioSourcesRef.current.delete(source);
                      if (audioSourcesRef.current.size === 0) {
                         setIsSpeaking(false);
-                        setStatusText("আমি শুনছি...");
+                        setStatusText("I'm listening, Jaan...");
                      }
                    });
                    
@@ -180,23 +201,24 @@ const VoiceAssistant: React.FC = () => {
           },
           onclose: () => {
             disconnect();
-            setStatusText("সংযোগ বিচ্ছিন্ন হয়েছে");
+            setStatusText("Disconnected.");
           },
           onerror: (err) => {
             console.error(err);
             disconnect();
-            setStatusText("ত্রুটি হয়েছে, আবার চেষ্টা করুন");
+            setStatusText("Connection Error. Try again.");
           }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
+            // Using 'Fenrir' or 'Kore' - Kore is usually female/softer in live demos
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
           },
           systemInstruction: SYSTEM_INSTRUCTION,
           tools: [
               { googleSearch: {} }, 
-              { functionDeclarations: [bookAppointmentTool] }
+              { functionDeclarations: [createRoutineTool] }
           ]
         }
       });
@@ -205,7 +227,7 @@ const VoiceAssistant: React.FC = () => {
 
     } catch (e) {
       console.error(e);
-      setStatusText("মাইক্রোফোন সমস্যা");
+      setStatusText("Microphone Error");
     }
   };
 
@@ -213,7 +235,7 @@ const VoiceAssistant: React.FC = () => {
     setIsConnected(false);
     setIsListening(false);
     setIsSpeaking(false);
-    setStatusText("কথা বলতে নিচের বাটনে চাপ দিন");
+    setStatusText("Touch my heart to connect...");
     
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -241,74 +263,89 @@ const VoiceAssistant: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-hospital-50 font-sans">
+    <div className="flex flex-col h-screen bg-rose-50 font-sans">
       <Header />
       
       <main className="flex-1 flex flex-col items-center justify-center p-6 relative overflow-hidden">
         
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-hospital-200 rounded-full blur-3xl opacity-20 pointer-events-none"></div>
+        {/* Ambient Background */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+             <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-rose-200 rounded-full blur-[100px] opacity-30 animate-blob"></div>
+             <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-200 rounded-full blur-[100px] opacity-30 animate-blob animation-delay-2000"></div>
+        </div>
         
-        <div className="mb-12 text-center z-10">
+        {/* Status Text */}
+        <div className="mb-16 text-center z-10 min-h-[80px]">
           <h2 className={clsx(
-            "text-2xl md:text-3xl font-bold transition-colors duration-500",
-            isSpeaking ? "text-hospital-700" : "text-gray-700"
+            "text-2xl md:text-3xl font-bold transition-all duration-500 font-handwriting",
+            isSpeaking ? "text-rose-600 scale-110" : "text-gray-600"
           )}>
             {statusText}
           </h2>
+          
+          {/* Audio Visualizer */}
           {isSpeaking && (
-             <p className="text-hospital-600 mt-2 animate-pulse">
-                AI কথা বলছে...
-             </p>
+             <div className="flex items-center justify-center gap-1 mt-4 h-8">
+                {visualizerHeight.map((h, i) => (
+                    <div 
+                        key={i} 
+                        className="w-1.5 bg-rose-500 rounded-full transition-all duration-75"
+                        style={{ height: `${h}px` }}
+                    ></div>
+                ))}
+             </div>
           )}
         </div>
 
+        {/* Main Heart Button */}
         <div className="relative z-10 group">
           {(isListening || isSpeaking) && (
             <>
-                <div className="absolute inset-0 bg-hospital-400 rounded-full animate-ping opacity-20"></div>
-                <div className="absolute inset-0 bg-hospital-300 rounded-full animate-ping opacity-20 delay-150"></div>
+                <div className="absolute inset-0 bg-rose-400 rounded-full animate-ping opacity-20 duration-[2s]"></div>
+                <div className="absolute inset-0 bg-rose-300 rounded-full animate-ping opacity-20 delay-150 duration-[2s]"></div>
             </>
           )}
 
           <button
             onClick={toggleConnection}
             className={clsx(
-              "relative w-32 h-32 md:w-40 md:h-40 rounded-full flex items-center justify-center shadow-xl transition-all duration-300 transform hover:scale-105",
+              "relative w-36 h-36 md:w-48 md:h-48 rounded-full flex items-center justify-center shadow-2xl transition-all duration-500 transform hover:scale-105 border-4 border-white",
               isConnected 
-                ? "bg-red-500 hover:bg-red-600 text-white" 
-                : "bg-hospital-600 hover:bg-hospital-700 text-white"
+                ? "bg-gradient-to-br from-rose-500 to-rose-700" 
+                : "bg-white hover:bg-rose-50"
             )}
           >
             {isConnected ? (
-              <MicOff size={48} strokeWidth={1.5} />
+              <div className="flex flex-col items-center animate-pulse-slow text-white">
+                 <Heart size={64} className="fill-current" />
+              </div>
             ) : (
-              <Mic size={48} strokeWidth={1.5} />
+              <div className="flex flex-col items-center text-rose-500">
+                 <Mic size={48} />
+                 <span className="text-xs font-medium mt-2">Connect</span>
+              </div>
             )}
           </button>
         </div>
 
+        {/* Feature Hints */}
         {!isConnected && (
-            <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-4 text-center z-10 max-w-lg">
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-hospital-100">
-                    <Activity className="w-6 h-6 text-hospital-500 mx-auto mb-2" />
-                    <p className="text-sm text-gray-600">ডাক্তার বা টেস্ট সম্পর্কে জানুন</p>
+            <div className="mt-16 flex flex-wrap justify-center gap-4 text-center z-10 max-w-2xl">
+                <div className="bg-white/60 backdrop-blur px-4 py-2 rounded-full border border-rose-100 flex items-center gap-2 text-gray-600 text-sm shadow-sm">
+                    <Heart className="w-4 h-4 text-rose-500" />
+                    <span>"Amar mon valo na"</span>
                 </div>
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-hospital-100">
-                    <CalendarCheck className="w-6 h-6 text-hospital-500 mx-auto mb-2" />
-                    <p className="text-sm text-gray-600">অ্যাপয়েন্টমেন্ট বুকিং করুন</p>
+                <div className="bg-white/60 backdrop-blur px-4 py-2 rounded-full border border-rose-100 flex items-center gap-2 text-gray-600 text-sm shadow-sm">
+                    <Sparkles className="w-4 h-4 text-yellow-500" />
+                    <span>"Routine baniye dao"</span>
+                </div>
+                <div className="bg-white/60 backdrop-blur px-4 py-2 rounded-full border border-rose-100 flex items-center gap-2 text-gray-600 text-sm shadow-sm">
+                    <Music className="w-4 h-4 text-purple-500" />
+                    <span>"Ekta gan geye shonao"</span>
                 </div>
             </div>
         )}
-
-        {/* Admin Link (Bottom Right) */}
-        <Link to="/admin" className="absolute bottom-6 right-6 text-gray-400 hover:text-hospital-600 flex items-center gap-1 text-xs">
-           <ShieldCheck size={14} /> Admin Access
-        </Link>
       </main>
-      
-      <footer className="bg-white py-4 border-t border-gray-100 text-center text-xs text-gray-400">
-        পপুলার ডায়াগনস্টিক এআই • ভয়েস অ্যাসিস্ট্যান্ট
-      </footer>
     </div>
   );
 };
