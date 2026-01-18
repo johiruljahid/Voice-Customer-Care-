@@ -1,0 +1,7 @@
+{
+  "name": "Popular Diagnostic AI Assistant",
+  "description": "A polite and friendly AI hospital assistant answering patient questions in Bangla, using data from Popular Diagnostic Center.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
